@@ -1,6 +1,50 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { Product, DEMO_PRODUCTS } from "../data/products";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function coerceProducts(value: unknown): Product[] | null {
+  if (!Array.isArray(value)) return null;
+
+  const coerced: Product[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+
+    const id = item.id;
+    const name = item.name;
+    const price = item.price;
+    const image = item.image;
+    const description = item.description;
+    const category = item.category;
+    const originalPrice = item.originalPrice;
+
+    if (
+      typeof id !== "string" ||
+      typeof name !== "string" ||
+      typeof price !== "number" ||
+      typeof image !== "string" ||
+      typeof description !== "string" ||
+      typeof category !== "string"
+    ) {
+      return null;
+    }
+
+    coerced.push({
+      id,
+      name,
+      price,
+      image,
+      description,
+      category,
+      originalPrice: typeof originalPrice === "number" ? originalPrice : undefined,
+    });
+  }
+
+  return coerced;
+}
+
 // ─── Types ───────────────────────────────────────────────────────
 interface AppContextType {
   products: Product[];
@@ -27,7 +71,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem("gkp_products");
-      return saved ? JSON.parse(saved) : DEMO_PRODUCTS;
+      if (!saved) return DEMO_PRODUCTS;
+      const parsed: unknown = JSON.parse(saved);
+      return coerceProducts(parsed) ?? DEMO_PRODUCTS;
     } catch {
       return DEMO_PRODUCTS;
     }
