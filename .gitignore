@@ -1,6 +1,9 @@
 # dependencies
 node_modules/
 
+# backend secrets
+backend/.env
+
 # build output
 /dist/
 
