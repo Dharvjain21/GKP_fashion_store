@@ -13,6 +13,11 @@ const productSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  originalPrice: {
+    // Optional: used for showing discount badges/strikethrough price
+    type: Number,
+    required: false,
+  },
   image: {
     // For now: store an image URL.
     // Later (optional): you can support uploads and store the uploaded file URL here.

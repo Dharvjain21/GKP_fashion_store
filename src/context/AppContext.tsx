@@ -51,9 +51,9 @@ interface AppContextType {
   isAdmin: boolean;
   login: (username: string, password: string) => boolean;
   logout: () => void;
-  addProduct: (p: Omit<Product, "id">) => void;
-  updateProduct: (p: Product) => void;
-  deleteProduct: (id: string) => void;
+  createProduct: (formData: FormData) => Promise<boolean>;
+  updateProduct: (id: string, formData: FormData) => Promise<boolean>;
+  deleteProduct: (id: string) => Promise<boolean>;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   activeCategory: string;
@@ -65,6 +65,18 @@ const ADMIN_USER = "gurukripaparidhan123";
 const ADMIN_PASS = "greshadharv781621";
 
 const AppContext = createContext<AppContextType | null>(null);
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+function apiUrl(path: string) {
+  // If VITE_API_URL is set (recommended on Netlify), use it.
+  // Otherwise fall back to same-origin (works if you proxy /api to your backend).
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
+function coerceProduct(value: unknown): Product | null {
+  const arr = coerceProducts([value]);
+  return arr ? arr[0] : null;
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   // Load products from localStorage or use demo data
@@ -91,6 +103,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("gkp_products", JSON.stringify(products));
   }, [products]);
 
+  // Load products from backend API (if configured)
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(apiUrl("/api/products"));
+        if (!res.ok) return;
+        const data: unknown = await res.json();
+        const parsed = coerceProducts(data);
+        if (!cancelled && parsed) {
+          setProducts(parsed);
+        }
+      } catch {
+        // If API is unavailable, keep localStorage/demo data
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Auth ────────────────────────────────────────────────────────
   const login = (username: string, password: string): boolean => {
     if (username === ADMIN_USER && password === ADMIN_PASS) {
@@ -106,18 +141,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("gkp_admin");
   };
 
-  // ── CRUD ────────────────────────────────────────────────────────
-  const addProduct = (p: Omit<Product, "id">) => {
-    const newProduct: Product = { ...p, id: Date.now().toString() };
-    setProducts((prev) => [newProduct, ...prev]);
+  // ── CRUD (backend API) ───────────────────────────────────────────
+  const createProduct = async (formData: FormData): Promise<boolean> => {
+    try {
+      const res = await fetch(apiUrl("/api/products"), {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) return false;
+      const created: unknown = await res.json();
+      const product = coerceProduct(created);
+      if (!product) return false;
+
+      setProducts((prev) => [product, ...prev]);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
-  const updateProduct = (p: Product) => {
-    setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+  const updateProduct = async (id: string, formData: FormData): Promise<boolean> => {
+    try {
+      const res = await fetch(apiUrl(`/api/products/${id}`), {
+        method: "PUT",
+        body: formData,
+      });
+
+      if (!res.ok) return false;
+      const updated: unknown = await res.json();
+      const product = coerceProduct(updated);
+      if (!product) return false;
+
+      setProducts((prev) => prev.map((x) => (x.id === id ? product : x)));
+      return true;
+    } catch {
+      return false;
+    }
   };
 
-  const deleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((x) => x.id !== id));
+  const deleteProduct = async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(apiUrl(`/api/products/${id}`), {
+        method: "DELETE",
+      });
+      if (!res.ok) return false;
+
+      setProducts((prev) => prev.filter((x) => x.id !== id));
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   return (
@@ -127,7 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         isAdmin,
         login,
         logout,
-        addProduct,
+        createProduct,
         updateProduct,
         deleteProduct,
         searchQuery,

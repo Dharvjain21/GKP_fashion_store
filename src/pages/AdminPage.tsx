@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Plus, Edit2, Trash2, X, Check, Package,
   LayoutDashboard, LogOut, ChevronDown, ChevronUp, Home,
@@ -15,19 +15,30 @@ const emptyForm = {
   name: "",
   price: "",
   originalPrice: "",
-  image: "",
+  image: "", // stores existing image URL (used mainly for edit mode)
   description: "",
   category: "Sarees",
 };
 
 export default function AdminPage({ onNavigate }: AdminPageProps) {
-  const { products, addProduct, updateProduct, deleteProduct, logout } = useApp();
+  const { products, createProduct, updateProduct, deleteProduct, logout } = useApp();
   const [view, setView] = useState<"dashboard" | "add" | "manage">("dashboard");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [success, setSuccess] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+
+  // Cleanup object URL previews to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (imagePreview.startsWith("blob:")) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
 
   // ── Form change ────────────────────────────────────────────────
   const onFormChange = (
@@ -47,41 +58,59 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       description: p.description,
       category: p.category,
     });
+    setImageFile(null);
+    setImagePreview("");
     setView("add");
   };
 
   // ── Save ───────────────────────────────────────────────────────
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const data = {
-      name: form.name,
-      price: Number(form.price),
-      originalPrice: form.originalPrice ? Number(form.originalPrice) : undefined,
-      image: form.image,
-      description: form.description,
-      category: form.category,
-    };
+    const formData = new FormData();
+    formData.append("name", form.name);
+    formData.append("price", form.price);
+    if (form.originalPrice) formData.append("originalPrice", form.originalPrice);
+    formData.append("description", form.description);
+    formData.append("category", form.category);
 
-    if (editingId) {
-      updateProduct({ ...data, id: editingId });
-      setSuccess("Product updated successfully!");
-    } else {
-      addProduct(data);
-      setSuccess("Product added successfully!");
+    // If user picked a file, send it. Otherwise (edit mode), keep existing image URL.
+    if (imageFile) {
+      formData.append("image", imageFile);
+    } else if (editingId && form.image) {
+      formData.append("image", form.image);
     }
+
+    const ok = editingId
+      ? await updateProduct(editingId, formData)
+      : await createProduct(formData);
+
+    if (!ok) {
+      setSuccess("Something went wrong. Please try again.");
+      setTimeout(() => setSuccess(""), 3000);
+      return;
+    }
+
+    setSuccess(editingId ? "Product updated successfully!" : "Product added successfully!");
 
     setForm(emptyForm);
     setEditingId(null);
+    setImageFile(null);
+    setImagePreview("");
     setTimeout(() => setSuccess(""), 3000);
     setView("manage");
   };
 
   // ── Delete ─────────────────────────────────────────────────────
-  const handleDelete = (id: string) => {
-    deleteProduct(id);
-    setDeleteConfirm(null);
-    setSuccess("Product deleted.");
-    setTimeout(() => setSuccess(""), 2500);
+  const handleDelete = async (id: string) => {
+    const ok = await deleteProduct(id);
+    if (ok) {
+      setDeleteConfirm(null);
+      setSuccess("Product deleted.");
+      setTimeout(() => setSuccess(""), 2500);
+    } else {
+      setSuccess("Failed to delete product.");
+      setTimeout(() => setSuccess(""), 3000);
+    }
   };
 
   return (
@@ -282,17 +311,34 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                 </select>
               </div>
 
-              {/* Image URL */}
+              {/* Image Upload */}
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Image URL *</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  Upload Image {editingId ? "(optional)" : "*"}
+                </label>
                 <input
-                  name="image"
-                  value={form.image}
-                  onChange={onFormChange}
-                  required
-                  placeholder="https://..."
+                  type="file"
+                  accept="image/*"
+                  required={!editingId}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setImageFile(file);
+
+                    if (imagePreview.startsWith("blob:")) {
+                      URL.revokeObjectURL(imagePreview);
+                    }
+
+                    if (file) {
+                      setImagePreview(URL.createObjectURL(file));
+                    } else {
+                      setImagePreview("");
+                    }
+                  }}
                   className="w-full px-4 py-2.5 text-sm border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 bg-gray-50"
                 />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Choose an image from your device. We’ll upload it to Cloudinary.
+                </p>
               </div>
 
               {/* Description */}
@@ -310,11 +356,11 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               </div>
 
               {/* Image Preview */}
-              {form.image && (
+              {(imagePreview || form.image) && (
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Image Preview</label>
                   <img
-                    src={form.image}
+                    src={imagePreview || form.image}
                     alt="Preview"
                     className="h-32 w-32 object-cover rounded-xl border border-gray-200"
                     onError={(e) => (e.currentTarget.style.display = "none")}
